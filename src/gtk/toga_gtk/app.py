@@ -21,6 +21,7 @@ def gtk_menu_item_activate(cmd):
         cmd.action(cmd)
     return _handler
 
+mainwindow = None   # UGLY HACK COS I DONT KNOW WHAT IM DOING
 
 class MainWindow(Window):
     _IMPL_CLASS = Gtk.ApplicationWindow
@@ -30,6 +31,20 @@ class MainWindow(Window):
         self.native.set_role("MainWindow")
         self.native.set_icon(toga_App.app.icon._impl.native_72.get_pixbuf())
 
+        self.headerbar = Gtk.HeaderBar()
+        self.headerbar.set_subtitle('Subtitle')
+        self.headerbar.set_show_close_button(True)
+        self.native.set_titlebar(self.headerbar)
+
+        self.primary_menu = Gtk.MenuButton()
+        self.headerbar.pack_end(self.primary_menu)
+
+        global mainwindow
+        mainwindow = self   # UGLY HACK COS I DONT KNOW WHAT IM DOING
+
+    def set_primary_menu(self, menu):
+        self.primary_menu.set_menu_model(menu)
+
     def set_app(self, app):
         super().set_app(app)
 
@@ -37,6 +52,7 @@ class MainWindow(Window):
         # but it's the only way I've found that actually sets the
         # Application name to something other than '__main__.py'.
         self.native.set_wmclass(app.interface.name, app.interface.name)
+        print('set app done')
 
     def on_close(self, *args):
         pass
@@ -71,6 +87,7 @@ class App:
         # self.native.connect('shutdown', self.shutdown)
 
         self.actions = None
+        self.menu = None
 
     def gtk_startup(self, data=None):
         # Set up the default commands for the interface.
@@ -91,10 +108,16 @@ class App:
 
         self.interface.startup()
 
+
+
         # Create the lookup table of menu items,
         # then force the creation of the menus.
         self._actions = {}
-        self.create_menus()
+
+        # Set the menu for the app.
+        self.menu = self.create_menus()
+
+        self.native.set_menubar(self.menu)
 
         # Now that we have menus, make the app take responsibility for
         # showing the menubar.
@@ -112,66 +135,69 @@ class App:
         pass
 
     def create_menus(self):
-        # Only create the menu if the menu item index has been created.
-        if hasattr(self, '_actions'):
-            self._actions = {}
-            menubar = Gio.Menu()
-            label = None
-            submenu = None
-            section = None
-            for cmd in self.interface.commands:
-                if cmd == GROUP_BREAK:
-                    if section:
-                        submenu.append_section(None, section)
 
-                    if label == '*':
-                        label = self.interface.name
-                    menubar.append_submenu(label, submenu)
-
-                    label = None
-                    submenu = None
-                    section = None
-                elif cmd == SECTION_BREAK:
+        menu = Gio.Menu()
+        label = None
+        submenu = None
+        section = None
+        for cmd in self.interface.commands:
+            if cmd == GROUP_BREAK:
+                if section:
                     submenu.append_section(None, section)
-                    section = None
 
-                else:
-                    if submenu is None:
-                        label = cmd.group.label
-                        submenu = Gio.Menu()
-
-                    if section is None:
-                        section = Gio.Menu()
-
-                    try:
-                        action = self._actions[cmd]
-                    except KeyError:
-                        cmd_id = "command-%s" % id(cmd)
-                        action = Gio.SimpleAction.new(cmd_id, None)
-                        if cmd.action:
-                            action.connect("activate", gtk_menu_item_activate(cmd))
-
-                        cmd._impl.native.append(action)
-                        cmd._impl.set_enabled(cmd.enabled)
-                        self._actions[cmd] = action
-                        self.native.add_action(action)
-
-                    item = Gio.MenuItem.new(cmd.label, 'app.' + cmd_id)
-                    if cmd.shortcut:
-                        item.set_attribute_value('accel', GLib.Variant('s', gtk_accel(cmd.shortcut)))
-
-                    section.append_item(item)
-
-            if section:
-                submenu.append_section(None, section)
-
-            if submenu:
                 if label == '*':
                     label = self.interface.name
-                menubar.append_submenu(label, submenu)
+                    global mainwindow   # UGLY HACK COS I DONT KNOW WHAT IM DOING
+                    mainwindow.set_primary_menu(submenu)
 
-            # Set the menu for the app.
-            self.native.set_menubar(menubar)
+                menu.append_submenu(label, submenu)
+
+                label = None
+                submenu = None
+                section = None
+            elif cmd == SECTION_BREAK:
+                submenu.append_section(None, section)
+                section = None
+
+            else:
+                if submenu is None:
+                    label = cmd.group.label
+                    submenu = Gio.Menu()
+
+                if section is None:
+                    section = Gio.Menu()
+
+                try:
+                    action = self._actions[cmd]
+                except KeyError:
+                    cmd_id = "command-%s" % id(cmd)
+                    action = Gio.SimpleAction.new(cmd_id, None)
+                    if cmd.action:
+                        action.connect("activate", gtk_menu_item_activate(cmd))
+
+                    cmd._impl.native.append(action)
+                    cmd._impl.set_enabled(cmd.enabled)
+                    self._actions[cmd] = action
+                    self.native.add_action(action)
+
+                item = Gio.MenuItem.new(cmd.label, 'app.' + cmd_id)
+                if cmd.shortcut:
+                    item.set_attribute_value('accel', GLib.Variant('s', gtk_accel(cmd.shortcut)))
+
+                section.append_item(item)
+
+        if section:
+            submenu.append_section(None, section)
+
+        if submenu:
+            if label == '*':
+                label = self.interface.name
+
+            menu.append_submenu(label, submenu)
+
+
+        return menu
+
 
     def main_loop(self):
         # Modify signal handlers to make sure Ctrl-C is caught and handled.
@@ -180,6 +206,7 @@ class App:
         self.loop.run_forever(application=self.native)
 
     def set_main_window(self, window):
+        self.main_window = window
         pass
 
     def exit(self):
